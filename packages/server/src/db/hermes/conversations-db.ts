@@ -1,16 +1,12 @@
 import { join } from 'path'
 import { getActiveProfileDir } from '../../services/hermes/hermes-profile'
+import { SQLITE_AVAILABLE, createDatabase } from '../index'
 import type {
   ConversationDetail,
   ConversationListOptions,
   ConversationMessage,
   ConversationSummary,
 } from '../../services/hermes/conversations'
-
-const SQLITE_AVAILABLE = (() => {
-  const [major, minor] = process.versions.node.split('.').map(Number)
-  return major > 22 || (major === 22 && minor >= 5)
-})()
 
 const LINEAGE_TOLERANCE_SECONDS = 3
 const LIVE_WINDOW_SECONDS = 300
@@ -361,11 +357,10 @@ function normalizeVisibleMessage(message: { id: number | string, session_id: str
 
 async function openConversationDb() {
   if (!SQLITE_AVAILABLE) {
-    throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
+    throw new Error(`SQLite requires Node >= 22.5 or better-sqlite3, current: ${process.versions.node}`)
   }
 
-  const { DatabaseSync } = await import('node:sqlite')
-  return new DatabaseSync(conversationDbPath(), { open: true, readOnly: true })
+  return createDatabase(conversationDbPath(), { readOnly: true })!
 }
 
 function buildConversationSessionSql(source?: string): { sql: string, params: any[] } {

@@ -1,12 +1,7 @@
 import { getActiveProfileDir, getProfileDir } from '../../services/hermes/hermes-profile'
 import { join } from 'path'
 import type { LocalUsageStats } from './usage-store'
-import { getDb } from '../index'
-
-const SQLITE_AVAILABLE = (() => {
-  const [major, minor] = process.versions.node.split('.').map(Number)
-  return major > 22 || (major === 22 && minor >= 5)
-})()
+import { getDb, SQLITE_AVAILABLE, createDatabase } from '../index'
 
 const COMPRESSION_END_REASONS = new Set(['compression', 'compressed'])
 const SEARCH_CANDIDATE_MULTIPLIER = 20
@@ -588,12 +583,11 @@ function chainOrderSql(ids: string[]): string {
 
 async function openSessionDb(profile?: string) {
   if (!SQLITE_AVAILABLE) {
-    throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
+    throw new Error(`SQLite requires Node >= 22.5 or better-sqlite3, current: ${process.versions.node}`)
   }
-  const { DatabaseSync } = await import('node:sqlite')
   const dbPath = profile ? join(getProfileDir(profile), 'state.db') : sessionDbPath()
   try {
-    return new DatabaseSync(dbPath, { open: true, readOnly: true })
+    return createDatabase(dbPath, { readOnly: true })!
   } catch (err: any) {
     console.error(`[sessions-db] Failed to open session db at ${dbPath}:`, err.message)
     throw err
@@ -657,9 +651,11 @@ export async function getSessionDetailFromDb(sessionId: string): Promise<HermesS
 }
 
 export async function getSessionDetailFromDbWithProfile(sessionId: string, profile: string): Promise<HermesSessionDetailRow | null> {
-  const { DatabaseSync } = await import('node:sqlite')
+  if (!SQLITE_AVAILABLE) {
+    throw new Error(`SQLite requires Node >= 22.5 or better-sqlite3, current: ${process.versions.node}`)
+  }
   const dbPath = join(getProfileDir(profile), 'state.db')
-  const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+  const db = createDatabase(dbPath, { readOnly: true })!
   try {
     const idx = loadAllSessions(db)
     const requested = idx.byId.get(sessionId) || null
@@ -730,9 +726,11 @@ export async function getSessionDetailPaginatedFromDbWithProfile(
 }
 
 export async function getExactSessionDetailFromDbWithProfile(sessionId: string, profile: string): Promise<HermesSessionDetailRow | null> {
-  const { DatabaseSync } = await import('node:sqlite')
+  if (!SQLITE_AVAILABLE) {
+    throw new Error(`SQLite requires Node >= 22.5 or better-sqlite3, current: ${process.versions.node}`)
+  }
   const dbPath = join(getProfileDir(profile), 'state.db')
-  const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+  const db = createDatabase(dbPath, { readOnly: true })!
   try {
     const idx = loadAllSessions(db)
     const requested = idx.byId.get(sessionId) || null
@@ -756,15 +754,14 @@ export async function findLatestExactSessionIdWithProfile(
   source?: string,
 ): Promise<string | null> {
   if (!SQLITE_AVAILABLE) {
-    throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
+    throw new Error(`SQLite requires Node >= 22.5 or better-sqlite3, current: ${process.versions.node}`)
   }
 
   const trimmed = query.trim()
   if (!trimmed) return null
 
-  const { DatabaseSync } = await import('node:sqlite')
   const dbPath = join(getProfileDir(profile), 'state.db')
-  const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+  const db = createDatabase(dbPath, { readOnly: true })!
   const loweredQuery = trimmed.toLowerCase()
   const likePattern = buildLikePattern(loweredQuery)
   const kanbanPrompt = `work kanban task ${trimmed}`.toLowerCase()
@@ -1210,7 +1207,7 @@ export async function getUsageStatsFromDb(
 
     if (!totals) return empty
 
-    const byModel = db.prepare(`
+    const byModel = (db.prepare(`
       SELECT
         COALESCE(model, '') AS model,
         COALESCE(SUM(input_tokens), 0) AS input_tokens,
@@ -1223,7 +1220,7 @@ export async function getUsageStatsFromDb(
       WHERE started_at > ? AND model IS NOT NULL
       GROUP BY model
       ORDER BY COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) DESC
-    `).all(since).map(row => ({
+    `).all(since) as Record<string, unknown>[]).map(row => ({
       model: String(row.model || ''),
       input_tokens: normalizeNumber(row.input_tokens),
       output_tokens: normalizeNumber(row.output_tokens),
@@ -1233,7 +1230,7 @@ export async function getUsageStatsFromDb(
       sessions: normalizeNumber(row.sessions),
     }))
 
-    const byDay = db.prepare(`
+    const byDay = (db.prepare(`
       SELECT
         date(started_at, 'unixepoch') AS date,
         COALESCE(SUM(input_tokens), 0) AS input_tokens,
@@ -1246,7 +1243,7 @@ export async function getUsageStatsFromDb(
       WHERE started_at > ?
       GROUP BY date
       ORDER BY date ASC
-    `).all(since).map(row => ({
+    `).all(since) as Record<string, unknown>[]).map(row => ({
       date: String(row.date || ''),
       input_tokens: normalizeNumber(row.input_tokens),
       output_tokens: normalizeNumber(row.output_tokens),
@@ -1276,12 +1273,11 @@ export async function getUsageStatsFromDb(
 
 export async function listSessionSummaries(source?: string, limit = 2000, profile?: string): Promise<HermesSessionRow[]> {
   if (!SQLITE_AVAILABLE) {
-    throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
+    throw new Error(`SQLite requires Node >= 22.5 or better-sqlite3, current: ${process.versions.node}`)
   }
 
-  const { DatabaseSync } = await import('node:sqlite')
   const dbPath = profile ? join(getProfileDir(profile), 'state.db') : sessionDbPath()
-  const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+  const db = createDatabase(dbPath, { readOnly: true })!
 
   try {
     const clauses = ["s.parent_session_id IS NULL", "s.source != 'tool'", "s.id NOT LIKE 'compress_%'"]
@@ -1320,15 +1316,14 @@ export async function searchSessionSummariesWithProfile(
   limit = 20,
 ): Promise<HermesSessionSearchRow[]> {
   if (!SQLITE_AVAILABLE) {
-    throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
+    throw new Error(`SQLite requires Node >= 22.5 or better-sqlite3, current: ${process.versions.node}`)
   }
 
   const trimmed = query.trim()
   if (!trimmed) return []
 
-  const { DatabaseSync } = await import('node:sqlite')
   const dbPath = join(getProfileDir(profile), 'state.db')
-  const db = new DatabaseSync(dbPath, { open: true, readOnly: true })
+  const db = createDatabase(dbPath, { readOnly: true })!
   const normalized = sanitizeFtsQuery(trimmed)
   const prefixQuery = toPrefixQuery(normalized)
   const titlePattern = buildLikePattern(normalizeTitleLikeQuery(trimmed).toLowerCase())
@@ -1420,7 +1415,7 @@ export async function searchSessionSummaries(
   limit = 20,
 ): Promise<HermesSessionSearchRow[]> {
   if (!SQLITE_AVAILABLE) {
-    throw new Error(`node:sqlite requires Node >= 22.5, current: ${process.versions.node}`)
+    throw new Error(`SQLite requires Node >= 22.5 or better-sqlite3, current: ${process.versions.node}`)
   }
 
   const trimmed = query.trim()
@@ -1434,8 +1429,7 @@ export async function searchSessionSummaries(
     }))
   }
 
-  const { DatabaseSync } = await import('node:sqlite')
-  const db = new DatabaseSync(sessionDbPath(), { open: true, readOnly: true })
+  const db = createDatabase(sessionDbPath(), { readOnly: true })!
   const normalized = sanitizeFtsQuery(trimmed)
   const prefixQuery = toPrefixQuery(normalized)
   const titlePattern = buildLikePattern(normalizeTitleLikeQuery(trimmed).toLowerCase())

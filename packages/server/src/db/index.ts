@@ -1,4 +1,3 @@
-import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs'
 import { resolve } from 'path'
 import { config } from '../config'
@@ -16,25 +15,60 @@ const DB_PATH = resolve(DB_DIR, 'hermes-web-ui.db')
 const JSON_PATH = resolve(DB_DIR, 'hermes-web-ui.json')
 
 // --- SQLite availability check ---
+// Try to load a synchronous SQLite constructor:
+//   1. node:sqlite (Node >= 22.5 built-in)
+//   2. better-sqlite3 (optional native addon, works on Node >= 18)
 
-const SQLITE_AVAILABLE = (() => {
-  const [major, minor] = process.versions.node.split('.').map(Number)
-  return major > 22 || (major === 22 && minor >= 5)
-})()
+type DatabaseConstructor = new (...args: any[]) => any
+
+let _DatabaseCtor: DatabaseConstructor | null = null
+let _dbSource: 'node:sqlite' | 'better-sqlite3' | null = null
+
+try {
+  _DatabaseCtor = require('node:sqlite').DatabaseSync
+  _dbSource = 'node:sqlite'
+} catch {
+  try {
+    _DatabaseCtor = require('better-sqlite3')
+    _dbSource = 'better-sqlite3'
+  } catch {
+    // Neither available — will use JSON fallback
+  }
+}
+
+export const SQLITE_AVAILABLE = _DatabaseCtor !== null
 
 export function isSqliteAvailable(): boolean {
   return SQLITE_AVAILABLE
 }
 
+export function getSqliteSource(): string | null {
+  return _dbSource
+}
+
+/**
+ * Create a new SQLite database connection.
+ * @param path  Database file path
+ * @param options.readOnly  Open in read-only mode
+ */
+export function createDatabase(path: string, options?: { readOnly?: boolean }): any | null {
+  if (!_DatabaseCtor) return null
+  if (_dbSource === 'better-sqlite3') {
+    return new _DatabaseCtor(path, options?.readOnly ? { readonly: true } : undefined)
+  }
+  // node:sqlite
+  return new _DatabaseCtor(path, options?.readOnly ? { open: true, readOnly: true } : undefined)
+}
+
 // --- SQLite backend ---
 
-let _db: DatabaseSync | null = null
+let _db: any | null = null
 
-export function getDb(): DatabaseSync | null {
-  if (!SQLITE_AVAILABLE) return null
+export function getDb(): any | null {
+  if (!_DatabaseCtor) return null
   if (!_db) {
     mkdirSync(DB_DIR, { recursive: true })
-    _db = new DatabaseSync(DB_PATH)
+    _db = new _DatabaseCtor(DB_PATH)
     // Use WAL mode for better concurrency and WSL compatibility
     if (isDev) {
       _db.exec('PRAGMA journal_mode=DELETE')

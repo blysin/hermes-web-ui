@@ -9,7 +9,7 @@
   "homepage": "https://hermes-studio.ai",
   "license": "BSL-1.1",
   "engines": {
-    "node": ">=23.0.0"
+    "node": ">=20.0.0"
   },
   "keywords": [
     "hermes",
@@ -106,7 +106,7 @@
     "axios": "^1.9.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "esbuild": "^0.27.0",
+    "esbuild": "0.26.0",
     "highlight.js": "^11.11.1",
     "js-yaml": "^4.1.1",
     "jsdom": "^27.0.1",
@@ -136,5 +136,11 @@
     "vue-tsc": "^3.2.8",
     "vue-virtual-scroller": "^3.0.4",
     "ws": "^8.20.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^9.6.0"
+  },
+  "overrides": {
+    "esbuild": "0.26.0"
   }
 }
