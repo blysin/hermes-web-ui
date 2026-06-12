@@ -1758,6 +1758,7 @@ async function handleSessionModelCustomSubmit() {
         <div ref="chatContentWrapperRef" class="chat-content-wrapper">
           <div class="chat-main-content">
             <MessageList ref="messageListRef" />
+            <ChatInput />
           </div>
           <OutlinePanel
             v-if="showOutline"
@@ -1806,7 +1807,6 @@ async function handleSessionModelCustomSubmit() {
             </div>
           </aside>
         </div>
-        <ChatInput />
       </template>
       <ConversationMonitorPane
         v-else
