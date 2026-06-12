@@ -16,6 +16,7 @@ import {
   NSelect,
   NTooltip,
   NPopconfirm,
+  NPopover,
   NRadioButton,
   NRadioGroup,
   useMessage,
@@ -32,6 +33,14 @@ import MessageList from "./MessageList.vue";
 import SessionListItem from "./SessionListItem.vue";
 import DrawerPanel from "./DrawerPanel.vue";
 import OutlinePanel from "./OutlinePanel.vue";
+import { useSessionSearch } from "@/composables/useSessionSearch";
+import ProfileSelector from "@/components/layout/ProfileSelector.vue";
+import ModelSelector from "@/components/layout/ModelSelector.vue";
+import LanguageSwitch from "@/components/layout/LanguageSwitch.vue";
+import ThemeSwitch from "@/components/layout/ThemeSwitch.vue";
+import VersionManagementModal from "@/components/layout/VersionManagementModal.vue";
+import { changelog } from "@/data/changelog";
+import { getStoredUsername } from "@/api/client";
 
 const chatStore = useChatStore();
 const appStore = useAppStore();
@@ -40,11 +49,15 @@ const sessionBrowserPrefsStore = useSessionBrowserPrefsStore();
 const router = useRouter();
 const message = useMessage();
 const { t } = useI18n();
+const { openSessionSearch } = useSessionSearch();
+const currentUsername = computed(() => getStoredUsername());
 
 const showDrawer = ref(false);
 const drawerActiveTab = ref<"terminal" | "files">("files");
 const showOutline = ref(false);
 const messageListRef = ref<InstanceType<typeof MessageList> | null>(null);
+const showVersionManagement = ref(false);
+const showChangelog = ref(false);
 
 const currentMode = ref<"chat" | "live">("chat");
 
@@ -66,6 +79,9 @@ const showSessions = ref(
 );
 let mobileQuery: MediaQueryList | null = null;
 const isMobile = ref(false);
+const isDesktopShell = computed(() =>
+  (window as typeof window & { hermesDesktop?: { isDesktop?: boolean } }).hermesDesktop?.isDesktop === true,
+);
 
 function sessionHref(sessionId: string) {
   return router.resolve({
@@ -98,10 +114,15 @@ function handleMobileChange(e: MediaQueryListEvent | MediaQueryList) {
   }
 }
 
+function openPageSidebar() {
+  showSessions.value = true;
+}
+
 onMounted(() => {
   mobileQuery = window.matchMedia("(max-width: 768px)");
   handleMobileChange(mobileQuery);
   mobileQuery.addEventListener("change", handleMobileChange);
+  window.addEventListener("hermes:open-page-sidebar", openPageSidebar);
   if (profilesStore.profiles.length === 0) {
     void profilesStore.fetchProfiles();
   }
@@ -109,6 +130,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   mobileQuery?.removeEventListener("change", handleMobileChange);
+  window.removeEventListener("hermes:open-page-sidebar", openPageSidebar);
 });
 const showRenameModal = ref(false);
 const renameValue = ref("");
@@ -166,6 +188,12 @@ watch(
 const activeSessionTitle = computed(
   () => chatStore.activeSession?.title || t("chat.newChat"),
 );
+
+const activeSessionModelLabel = computed(() => {
+  const session = chatStore.activeSession;
+  if (!session?.model) return t("models.selectModel");
+  return appStore.displayModelName(session.model, session.provider);
+});
 
 const headerTitle = computed(() =>
   currentMode.value === "live"
@@ -615,6 +643,40 @@ const contextMenuOptions = computed(() => {
   return options
 });
 
+async function handleUpdate() {
+  const ok = await appStore.doUpdate();
+  if (ok) {
+    message.success(t("sidebar.updateSuccess"), { duration: 5000 });
+  } else {
+    message.error(t("sidebar.updateFailed"));
+  }
+}
+
+function handleReloadClient() {
+  appStore.reloadClient();
+}
+
+function openVersionManagement() {
+  showVersionManagement.value = true;
+}
+
+function openChangelog() {
+  showChangelog.value = true;
+}
+
+function openSettingsPage() {
+  router.push({ name: "hermes.settings" });
+}
+
+function openGroupChatPage() {
+  router.push({ name: "hermes.groupChat" });
+}
+
+function handleLogout() {
+  localStorage.clear();
+  window.location.reload();
+}
+
 function handleContextMenu(e: MouseEvent, sessionId: string) {
   e.preventDefault();
   contextSessionId.value = sessionId;
@@ -783,7 +845,9 @@ async function openSessionModelModal(sessionId: string) {
   if (appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0) {
     await appStore.loadModels();
   }
-  const session = chatStore.sessions.find((s) => s.id === sessionId);
+  const session =
+    chatStore.sessions.find((s) => s.id === sessionId) ||
+    (chatStore.activeSession?.id === sessionId ? chatStore.activeSession : undefined);
   const defaults = session?.profile
     ? getDefaultModelForProfile(session.profile)
     : { provider: "", model: "" };
@@ -795,6 +859,15 @@ async function openSessionModelModal(sessionId: string) {
   sessionModelCustomInput.value = "";
   sessionModelCollapsedGroups.value = {};
   showSessionModelModal.value = true;
+}
+
+function handleHeaderModelClick() {
+  const sessionId = chatStore.activeSession?.id;
+  if (!sessionId) {
+    openNewChatModal();
+    return;
+  }
+  openSessionModelModal(sessionId);
 }
 
 function isSessionModelGroupCollapsed(provider: string) {
@@ -852,101 +925,63 @@ async function handleSessionModelCustomSubmit() {
       class="session-list"
       :class="{ collapsed: !showSessions }"
     >
-      <div class="session-list-header">
-        <span v-if="showSessions" class="session-list-title">{{
-          t("chat.webUiSessions")
-        }}</span>
-        <div class="session-list-actions">
-          <button class="session-close-btn" @click="showSessions = false">
+      <div v-if="showSessions" class="page-sidebar-top">
+        <div class="page-sidebar-tabs" role="tablist" aria-label="Chat actions">
+          <button class="page-sidebar-tab" type="button" @click="openNewChatModal">
             <svg
-              width="14"
-              height="14"
+              width="15"
+              height="15"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               stroke-width="2"
             >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
+            <span>{{ t("chat.newChat") }}</span>
           </button>
-          <NButton
-            v-if="!isBatchMode"
-            quaternary
-            size="tiny"
-            @click="toggleBatchMode"
-            :title="t('chat.toggleBatchMode')"
-          >
-            <template #icon>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path d="M9 11l3 3L22 4" />
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-              </svg>
-            </template>
-          </NButton>
-          <NButton
-            v-if="isBatchMode"
-            quaternary
-            size="tiny"
-            @click="selectAllSessions"
-            :disabled="!canSelectAll || isBatchDeleting"
-            :title="t('chat.selectAll')"
-          >
-            <template #icon>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path d="M9 11l3 3L22 4" />
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-              </svg>
-            </template>
-          </NButton>
-          <NPopconfirm
-            v-if="isBatchMode && selectedCount > 0"
-            v-model:show="showBatchDeleteConfirm"
-            :positive-button-props="{ loading: isBatchDeleting, disabled: isBatchDeleting }"
-            :negative-button-props="{ disabled: isBatchDeleting }"
-            @positive-click="handleBatchDeleteConfirm"
-          >
-            <template #trigger>
-              <NButton quaternary size="tiny" type="error" :loading="isBatchDeleting" :disabled="isBatchDeleting">
-                <template #icon>
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  </svg>
-                </template>
-              </NButton>
-            </template>
-            {{ t('chat.confirmBatchDelete', { count: selectedCount }) }}
-          </NPopconfirm>
-          <NButton
-            v-if="isBatchMode"
-            quaternary
-            size="tiny"
-            @click="toggleBatchMode"
-            :disabled="isBatchDeleting"
-          >
-            <template #icon>
+          <button class="page-sidebar-tab" type="button" @click="openSessionSearch">
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+            <span>{{ t("sidebar.search") }}</span>
+          </button>
+          <button class="page-sidebar-tab" type="button">
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            <span>{{ t("sidebar.apiRelay") }}</span>
+          </button>
+        </div>
+        <div class="session-list-toolbar">
+          <NSelect
+            class="session-profile-filter"
+            :value="sessionProfileFilter || '__all__'"
+            :options="profileFilterOptions"
+            size="small"
+            :loading="profilesStore.loading"
+            @update:value="handleProfileFilterChange"
+          />
+          <div class="session-list-actions">
+            <button class="session-close-btn" @click="showSessions = false">
               <svg
                 width="14"
                 height="14"
@@ -958,33 +993,118 @@ async function handleSessionModelCustomSubmit() {
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
-            </template>
-          </NButton>
-          <NButton quaternary size="tiny" circle @click="openNewChatModal">
-            <template #icon>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-            </template>
-          </NButton>
+            </button>
+            <NButton
+              v-if="!isBatchMode"
+              quaternary
+              size="tiny"
+              @click="toggleBatchMode"
+              :title="t('chat.toggleBatchMode')"
+            >
+              <template #icon>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M9 11l3 3L22 4" />
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg>
+              </template>
+            </NButton>
+            <NButton
+              v-if="isBatchMode"
+              quaternary
+              size="tiny"
+              @click="selectAllSessions"
+              :disabled="!canSelectAll || isBatchDeleting"
+              :title="t('chat.selectAll')"
+            >
+              <template #icon>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M9 11l3 3L22 4" />
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                </svg>
+              </template>
+            </NButton>
+            <NPopconfirm
+              v-if="isBatchMode && selectedCount > 0"
+              v-model:show="showBatchDeleteConfirm"
+              :positive-button-props="{ loading: isBatchDeleting, disabled: isBatchDeleting }"
+              :negative-button-props="{ disabled: isBatchDeleting }"
+              @positive-click="handleBatchDeleteConfirm"
+            >
+              <template #trigger>
+                <NButton quaternary size="tiny" type="error" :loading="isBatchDeleting" :disabled="isBatchDeleting">
+                  <template #icon>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </template>
+                </NButton>
+              </template>
+              {{ t('chat.confirmBatchDelete', { count: selectedCount }) }}
+            </NPopconfirm>
+            <NButton
+              v-if="isBatchMode"
+              quaternary
+              size="tiny"
+              @click="toggleBatchMode"
+              :disabled="isBatchDeleting"
+            >
+              <template #icon>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </template>
+            </NButton>
+          </div>
         </div>
-      </div>
-      <div v-if="showSessions" class="session-profile-filter">
-        <NSelect
-          :value="sessionProfileFilter || '__all__'"
-          :options="profileFilterOptions"
-          size="small"
-          :loading="profilesStore.loading"
-          @update:value="handleProfileFilterChange"
-        />
+        <div class="conversation-switch" role="tablist" aria-label="Conversation type">
+          <button
+            class="conversation-switch-tab active"
+            type="button"
+            role="tab"
+            aria-selected="true"
+          >
+            {{ t("sidebar.singleChat") }}
+          </button>
+          <button
+            class="conversation-switch-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            @click="openGroupChatPage"
+          >
+            {{ t("sidebar.groupChat") }}
+          </button>
+        </div>
       </div>
       <div v-if="showSessions" class="session-items">
         <div
@@ -1044,6 +1164,154 @@ async function handleSessionModelCustomSubmit() {
           @delete="handleDeleteSession(s.id)"
           @toggle-select="toggleSessionSelection(s)"
         />
+      </div>
+      <div v-if="showSessions" class="page-sidebar-bottom">
+        <NPopover
+          trigger="click"
+          placement="top-start"
+          :show-arrow="false"
+          raw
+        >
+          <template #trigger>
+            <button class="page-sidebar-menu-btn" type="button">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+              <span>{{ t("sidebar.settings") }}</span>
+            </button>
+          </template>
+          <div class="page-sidebar-popover">
+            <ProfileSelector />
+            <ModelSelector />
+            <div class="page-sidebar-popover-row">
+              <div
+                class="status-indicator"
+                :class="{
+                  connected: appStore.connected,
+                  disconnected: !appStore.connected,
+                }"
+              >
+                <span class="status-dot"></span>
+                <span class="status-text">{{
+                  appStore.connected
+                    ? t("sidebar.connected")
+                    : t("sidebar.disconnected")
+                }}</span>
+              </div>
+              <LanguageSwitch />
+            </div>
+            <div class="page-sidebar-version-row">
+              <div class="page-sidebar-version-links">
+                <a class="page-sidebar-link" href="https://github.com/EKKOLearnAI/hermes-web-ui" target="_blank" rel="noopener noreferrer" title="GitHub">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                </a>
+                <a class="page-sidebar-link" href="https://hermes-studio.ai/" target="_blank" rel="noopener noreferrer" title="Website">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                </a>
+              </div>
+              <span
+                class="page-sidebar-version-text"
+                role="button"
+                tabindex="0"
+                @click="openChangelog"
+                @keydown.enter="openChangelog"
+                @keydown.space.prevent="openChangelog"
+              >
+                Studio v{{ appStore.serverVersion || "0.1.0" }}
+              </span>
+              <ThemeSwitch />
+            </div>
+            <button class="page-sidebar-nav-btn" type="button" @click="openSettingsPage">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <line x1="4" y1="6" x2="20" y2="6" />
+                <line x1="4" y1="12" x2="20" y2="12" />
+                <line x1="4" y1="18" x2="20" y2="18" />
+              </svg>
+              <span>{{ t("sidebar.settings") }}</span>
+            </button>
+            <button class="page-sidebar-logout-btn" type="button" @click="handleLogout">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+              <span>{{ t("sidebar.logout") }}</span>
+              <span v-if="currentUsername" class="page-sidebar-logout-user" :title="currentUsername">
+                {{ currentUsername }}
+              </span>
+            </button>
+            <NButton
+              v-if="isDesktopShell"
+              type="primary"
+              size="tiny"
+              block
+              @click="openVersionManagement"
+            >
+              {{ t("sidebar.versionManagement") }}
+            </NButton>
+            <NButton
+              v-if="appStore.clientOutdated"
+              type="warning"
+              size="tiny"
+              block
+              @click="handleReloadClient"
+            >
+              {{ t("sidebar.reloadClientVersion", { version: appStore.serverVersion }) }}
+            </NButton>
+            <NButton
+              v-if="appStore.updateAvailable"
+              type="primary"
+              size="tiny"
+              block
+              :loading="appStore.updating"
+              @click="handleUpdate"
+            >
+              {{ appStore.updating ? t("sidebar.updating") : t("sidebar.updateVersion", { version: appStore.latestVersion }) }}
+            </NButton>
+          </div>
+        </NPopover>
+        <NModal v-model:show="showChangelog" preset="dialog" :title="t('sidebar.changelog')" style="width: 520px;">
+          <div class="changelog-list">
+            <div v-for="entry in changelog" :key="entry.version" class="changelog-version-block">
+              <div class="changelog-version-header">
+                <span class="changelog-version-tag">v{{ entry.version }}</span>
+                <span class="changelog-date">{{ entry.date }}</span>
+              </div>
+              <ul class="changelog-changes">
+                <li v-for="(change, idx) in entry.changes" :key="idx">{{ t(change) }}</li>
+              </ul>
+            </div>
+          </div>
+        </NModal>
+        <VersionManagementModal v-if="isDesktopShell" v-model:show="showVersionManagement" />
       </div>
     </aside>
 
@@ -1289,6 +1557,7 @@ async function handleSessionModelCustomSubmit() {
         <div class="header-left">
           <NButton
             v-if="currentMode === 'chat'"
+            class="header-sidebar-toggle"
             quaternary
             size="small"
             @click="showSessions = !showSessions"
@@ -1376,7 +1645,13 @@ async function handleSessionModelCustomSubmit() {
               </template>
               {{ t("chat.copySessionId") }}
             </NTooltip>
-            <NButton size="small" :circle="isMobile" @click="openNewChatModal">
+            <NButton
+              class="header-model-button"
+              size="small"
+              :circle="isMobile"
+              :title="activeSessionModelLabel"
+              @click="handleHeaderModelClick"
+            >
               <template #icon>
                 <svg
                   width="14"
@@ -1384,13 +1659,22 @@ async function handleSessionModelCustomSubmit() {
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  stroke-width="2"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
                 >
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M12 1v4" />
+                  <path d="M12 19v4" />
+                  <path d="M1 12h4" />
+                  <path d="M19 12h4" />
+                  <path d="M4.22 4.22l2.83 2.83" />
+                  <path d="M16.95 16.95l2.83 2.83" />
+                  <path d="M4.22 19.78l2.83-2.83" />
+                  <path d="M16.95 7.05l2.83-2.83" />
                 </svg>
               </template>
-              <template v-if="!isMobile">{{ t("chat.newChat") }}</template>
+              <template v-if="!isMobile">{{ activeSessionModelLabel }}</template>
             </NButton>
           </template>
         </div>
@@ -1630,7 +1914,7 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .session-list {
-  width: 220px;
+  width: $sidebar-width;
   border-right: 1px solid $border-color;
   display: flex;
   flex-direction: column;
@@ -1655,7 +1939,7 @@ async function handleSessionModelCustomSubmit() {
     z-index: 120;
     background: $bg-card;
     box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
-    width: 280px;
+    width: $sidebar-width;
 
     &.collapsed {
       transform: translateX(-100%);
@@ -1685,13 +1969,61 @@ async function handleSessionModelCustomSubmit() {
   }
 }
 
-.session-list-header {
+.page-sidebar-top {
+  flex-shrink: 0;
+  padding: 12px;
+  border-bottom: 1px solid $border-color;
+}
+
+.page-sidebar-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.page-sidebar-tab {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: none;
+  border-radius: $radius-sm;
+  background: transparent;
+  color: $text-secondary;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    color $transition-fast;
+
+  svg {
+    flex-shrink: 0;
+  }
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  &:hover {
+    background: rgba(var(--accent-primary-rgb), 0.06);
+    color: $text-primary;
+  }
+}
+
+.session-list-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px;
-  flex-shrink: 0;
-  min-height: 0;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .session-list-actions {
@@ -1737,7 +2069,43 @@ async function handleSessionModelCustomSubmit() {
 }
 
 .session-profile-filter {
-  margin: 0 8px 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.conversation-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 8px;
+  padding: 2px;
+  border-radius: $radius-sm;
+  background: rgba(var(--accent-primary-rgb), 0.05);
+}
+
+.conversation-switch-tab {
+  min-width: 0;
+  height: 28px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: $text-secondary;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    color $transition-fast;
+
+  &:hover {
+    color: $text-primary;
+  }
+
+  &.active {
+    background: $bg-card;
+    color: $text-primary;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
 }
 
 .new-chat-form {
@@ -1849,7 +2217,284 @@ async function handleSessionModelCustomSubmit() {
 .session-items {
   flex: 1;
   overflow-y: auto;
-  padding: 0 6px 12px;
+  padding: 10px 6px 12px;
+}
+
+.page-sidebar-bottom {
+  flex-shrink: 0;
+  padding: 10px 12px;
+}
+
+.page-sidebar-menu-btn {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border: none;
+  border-radius: $radius-sm;
+  background: transparent;
+  color: $text-secondary;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    color $transition-fast;
+
+  &:hover {
+    background: rgba(var(--accent-primary-rgb), 0.06);
+    color: $text-primary;
+  }
+}
+
+.page-sidebar-menu-btn span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.page-sidebar-popover {
+  width: $sidebar-width;
+  padding: 12px;
+  border: 1px solid $border-color;
+  border-radius: $radius-md;
+  background: $bg-card;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.18);
+}
+
+.page-sidebar-popover :deep(.profile-selector),
+.page-sidebar-popover :deep(.model-selector) {
+  padding: 0;
+}
+
+.page-sidebar-popover :deep(.model-selector) {
+  margin-bottom: 10px;
+}
+
+.page-sidebar-popover :deep(.language-switch) {
+  width: 88px;
+  flex: 0 0 88px;
+}
+
+.page-sidebar-popover :deep(.language-switch .n-base-selection-input__content) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-sidebar-popover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid $border-color;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: $text-secondary;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-indicator.connected .status-dot {
+  background-color: $success;
+  box-shadow: 0 0 6px rgba(var(--success-rgb), 0.5);
+}
+
+.status-indicator.disconnected .status-dot {
+  background-color: $error;
+}
+
+.status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-sidebar-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 0;
+  border-top: 1px solid $border-color;
+}
+
+.page-sidebar-version-links {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.page-sidebar-link {
+  color: $text-muted;
+  display: flex;
+  align-items: center;
+  transition: color $transition-fast;
+
+  &:hover {
+    color: $text-primary;
+  }
+}
+
+.page-sidebar-version-text {
+  flex: 0 0 auto;
+  color: $text-muted;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color $transition-fast;
+
+  &:hover {
+    color: $accent-primary;
+  }
+}
+
+.page-sidebar-version-row :deep(.theme-switch-container) {
+  flex-shrink: 0;
+}
+
+.page-sidebar-nav-btn {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border: none;
+  border-top: 1px solid $border-color;
+  border-radius: 0;
+  background: transparent;
+  color: $text-secondary;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    color $transition-fast;
+
+  &:hover {
+    color: $text-primary;
+  }
+}
+
+.page-sidebar-nav-btn span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.page-sidebar-logout-btn {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border: none;
+  border-top: 1px solid $border-color;
+  border-radius: 0;
+  background: transparent;
+  color: $text-secondary;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition:
+    background-color $transition-fast,
+    color $transition-fast;
+
+  &:hover {
+    color: $error;
+  }
+}
+
+.page-sidebar-logout-user {
+  margin-left: auto;
+  min-width: 0;
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: $text-muted;
+  font-size: 12px;
+}
+
+.changelog-list {
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+}
+
+.changelog-version-block {
+  margin-bottom: 20px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.changelog-version-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.changelog-version-tag {
+  font-weight: 600;
+  font-size: 14px;
+  color: $text-primary;
+  font-family: $font-code;
+}
+
+.changelog-date {
+  font-size: 12px;
+  color: $text-muted;
+}
+
+.changelog-changes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+
+  li {
+    font-size: 13px;
+    color: $text-secondary;
+    padding: 4px 0 4px 16px;
+    position: relative;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 12px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: $text-muted;
+    }
+  }
 }
 
 .session-loading,
@@ -1858,153 +2503,6 @@ async function handleSessionModelCustomSubmit() {
   font-size: 12px;
   color: $text-muted;
   text-align: center;
-}
-
-:deep(.session-item) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  background: none;
-  border-radius: $radius-sm;
-  cursor: pointer;
-  text-align: left;
-  text-decoration: none;
-  color: $text-secondary;
-  transition: all $transition-fast;
-  margin-bottom: 2px;
-
-  &:hover {
-    background: rgba($accent-primary, 0.06);
-    color: $text-primary;
-
-    .session-item-delete {
-      opacity: 1;
-    }
-  }
-
-  &.active {
-    background: rgba(var(--accent-primary-rgb), 0.12);
-    color: $text-primary;
-    font-weight: 500;
-  }
-
-  &.active .session-item-title {
-    color: $accent-primary;
-  }
-
-  &.missing-models {
-    color: #b42318;
-    background: rgba(220, 38, 38, 0.08);
-
-    .session-item-title,
-    .session-item-profile-name,
-    .session-item-time {
-      color: #b42318;
-    }
-
-    .session-item-model {
-      color: #b42318;
-      background: rgba(220, 38, 38, 0.12);
-    }
-
-    &:hover {
-      background: rgba(220, 38, 38, 0.12);
-    }
-  }
-}
-
-:deep(.session-item-content) {
-  flex: 1;
-  overflow: hidden;
-}
-
-:deep(.session-item-title-row) {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-:deep(.session-item-title) {
-  display: block;
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-:deep(.session-item-streaming) {
-  display: inline-block;
-  flex-shrink: 0;
-  margin-right: 4px;
-  vertical-align: middle;
-  animation: spin 1.2s linear infinite;
-  color: $accent-primary;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-:deep(.session-item-pin) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: $accent-primary;
-}
-
-:deep(.session-item-time) {
-  font-size: 11px;
-  color: $text-muted;
-}
-
-:deep(.session-item-meta) {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-:deep(.session-item-model) {
-  font-size: 10px;
-  color: $accent-primary;
-  background: rgba($accent-primary, 0.08);
-  padding: 0 5px;
-  border-radius: 3px;
-  line-height: 16px;
-  flex-shrink: 0;
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:deep(.session-item-delete) {
-  flex-shrink: 0;
-  opacity: 0.5;
-  padding: 2px;
-  border: none;
-  background: none;
-  color: $text-muted;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all $transition-fast;
-
-  &:hover {
-    color: $error;
-    background: rgba($error, 0.1);
-  }
 }
 
 .chat-main {
@@ -2077,6 +2575,17 @@ async function handleSessionModelCustomSubmit() {
   flex-shrink: 0;
 }
 
+.header-model-button {
+  max-width: 220px;
+}
+
+.header-model-button :deep(.n-button__content) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-mode-toggle {
   display: flex;
   align-items: center;
@@ -2087,6 +2596,19 @@ async function handleSessionModelCustomSubmit() {
 @media (max-width: $breakpoint-mobile) {
   .chat-header {
     padding: 16px 12px 16px 52px;
+  }
+
+  .header-sidebar-toggle {
+    display: none;
+  }
+
+  .page-sidebar-popover {
+    width: min($sidebar-width, calc(100vw - 24px));
+  }
+
+  .page-sidebar-popover :deep(.language-switch) {
+    width: 86px;
+    flex-basis: 86px;
   }
 }
 
