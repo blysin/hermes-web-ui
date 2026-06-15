@@ -14,6 +14,10 @@ import type { QueuedRun, SessionState } from './types'
 
 const ABORT_BRIDGE_SYNC_TIMEOUT_MESSAGE = 'Hermes Agent is still stopping. New messages will be queued until the current run exits.'
 
+function isBridgeRunSource(source?: string): boolean {
+  return source === 'cli' || source === 'global_agent'
+}
+
 export async function handleAbort(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
@@ -64,13 +68,13 @@ export async function handleAbort(
   logger.info({ sessionId, runId }, '[chat-run-socket][abort] started')
 
   // Flush in-memory assistant text to DB before aborting the stream.
-  if (activeState.source === 'cli') {
+  if (isBridgeRunSource(activeState.source)) {
     flushBridgePendingToDb(activeState, sessionId)
   } else {
     flushResponseRunToDb(activeState, sessionId)
   }
 
-  if (activeState.source === 'cli') {
+  if (isBridgeRunSource(activeState.source)) {
     let interruptResult: any = null
     try {
       interruptResult = await bridge.interrupt(sessionId, 'Aborted by user', activeState.profile)

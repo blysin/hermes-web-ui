@@ -25,6 +25,7 @@ export interface CodingAgentRunSocketData {
   api_key?: string
   apiMode?: any
   api_mode?: any
+  session_source?: 'global_agent'
 }
 
 function codingAgentId(data: CodingAgentRunSocketData): CodingAgentId {
@@ -73,6 +74,7 @@ export async function handleCodingAgentRun(
       baseUrl: data.baseUrl || data.base_url,
       apiKey: data.apiKey || data.api_key,
       apiMode: data.apiMode || data.api_mode,
+      sessionSource: data.session_source,
     }, state)
     runId = started.agentSessionId
   }

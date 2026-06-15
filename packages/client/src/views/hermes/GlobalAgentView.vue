@@ -24,32 +24,16 @@ const routeProfile = computed(() => {
   return typeof value === 'string' && value.trim() ? value : null
 })
 
-const productTitle = 'Hermes Studio'
-const tabTitle = computed(() => {
-  if (route.name !== 'hermes.session') return productTitle
-  return chatStore.activeSession?.title?.trim() || productTitle
-})
-
-watch(tabTitle, (value) => {
-  document.title = value
-}, { immediate: true })
-
-onUnmounted(() => {
-  document.title = productTitle
-})
-
 async function loadRouteSession() {
   await chatStore.loadSessions(chatStore.sessionProfileFilter, routeSessionId.value)
   if (routeSessionId.value && chatStore.activeSessionId !== routeSessionId.value) {
-    await router.replace({ name: 'hermes.chat' })
+    await router.replace({ name: 'hermes.globalAgent' })
   }
 }
 
 onMounted(async () => {
-  chatStore.setRuntimeMode('default')
+  chatStore.setRuntimeMode('global_agent')
   appStore.loadModels()
-  // 先加载 profile，确保缓存 key 使用正确的 profile name；同时预取显示设置，
-  // 让聊天完成提示音不依赖用户先打开 Settings 页面。
   await Promise.all([
     profilesStore.fetchProfiles(),
     settingsStore.fetchSettings(),
@@ -57,8 +41,12 @@ onMounted(async () => {
   await loadRouteSession()
 })
 
+onUnmounted(() => {
+  chatStore.setRuntimeMode('default')
+})
+
 watch([routeSessionId, routeProfile], async ([sessionId]) => {
-  if (!chatStore.sessionsLoaded) return
+  if (chatStore.runtimeMode !== 'global_agent' || !chatStore.sessionsLoaded) return
   if (!sessionId) {
     await chatStore.loadSessions(chatStore.sessionProfileFilter)
     return
@@ -76,13 +64,13 @@ watch([routeSessionId, routeProfile], async ([sessionId]) => {
 </script>
 
 <template>
-  <div class="chat-view">
+  <div class="global-agent-view">
     <ChatPanel />
   </div>
 </template>
 
 <style scoped lang="scss">
-.chat-view {
+.global-agent-view {
   height: calc(100 * var(--vh));
   display: flex;
   flex-direction: column;

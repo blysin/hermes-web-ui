@@ -196,6 +196,47 @@ describe('bridge run final context usage', () => {
     }))
   })
 
+  it('creates global-agent bridge sessions with source global_agent', async () => {
+    getSessionMock.mockReturnValue(undefined)
+    addMessageMock.mockReturnValue(42)
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    const state = makeState()
+    const sessionMap = new Map([['session-1', state]])
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'started' }),
+      contextEstimate: vi.fn().mockResolvedValue({
+        token_count: 42,
+        message_count: 1,
+        tool_count: 0,
+        system_prompt_chars: 13,
+      }),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-1', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/services/hermes/run-chat/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1', source: 'global_agent' },
+      'default',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(createSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'session-1',
+      source: 'global_agent',
+    }))
+    expect(state.source).toBe('global_agent')
+  })
+
   it('evaluates active goals after a successful bridge run and queues continuation prompts', async () => {
     const emit = vi.fn()
     const nsp = makeNamespace(emit)

@@ -59,4 +59,38 @@ describe('handleCodingAgentRun', () => {
     }), state)
     expect(sendCodingAgentRunInputMock).toHaveBeenCalledWith('session-1', 'use global codex')
   })
+
+  it('passes global session source through to the coding-agent runner', async () => {
+    managerMock.runIdForSession.mockReturnValue(undefined)
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    startCodingAgentRunMock.mockResolvedValue({ agentSessionId: 'agent-session-1' })
+    sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'agent-session-1' })
+
+    const { handleCodingAgentRun } = await import('../../packages/server/src/services/hermes/run-chat/handle-coding-agent-run')
+    const state = {
+      messages: [],
+      isWorking: false,
+      isAborting: false,
+      events: [],
+      queue: [],
+    }
+    const sessionMap = new Map([['session-1', state]])
+    const socket = {
+      join: vi.fn(),
+      emit: vi.fn(),
+    }
+
+    await handleCodingAgentRun({} as any, socket as any, {
+      session_id: 'session-1',
+      input: 'hello codex',
+      coding_agent_id: 'codex',
+      session_source: 'global_agent',
+    }, 'default', sessionMap as any)
+
+    expect(startCodingAgentRunMock).toHaveBeenCalledWith('codex', expect.objectContaining({
+      sessionId: 'session-1',
+      sessionSource: 'global_agent',
+    }), state)
+    expect(sendCodingAgentRunInputMock).toHaveBeenCalledWith('session-1', 'hello codex')
+  })
 })

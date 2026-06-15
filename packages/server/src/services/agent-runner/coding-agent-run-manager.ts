@@ -68,6 +68,7 @@ export interface CodingAgentRunLaunch {
   workspaceDir: string
   env?: NodeJS.ProcessEnv
   state?: SessionState
+  sessionSource?: 'global_agent'
 }
 
 interface ManagedCodingAgentRun {
@@ -610,10 +611,11 @@ export class CodingAgentRunManager {
 
   private ensureDbSession(run: ManagedCodingAgentRun) {
     if (getSession(run.launch.sessionId)) return
+    const source = run.launch.sessionSource === 'global_agent' ? 'global_agent' : 'coding_agent'
     createSession({
       id: run.launch.sessionId,
       profile: run.launch.profile,
-        source: 'coding_agent',
+        source,
         agent: run.launch.agentId === 'codex' ? 'codex' : 'claude',
         agent_session_id: run.id,
         agent_native_session_id: run.launch.agentNativeSessionId,

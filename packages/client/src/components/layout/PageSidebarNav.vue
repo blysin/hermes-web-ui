@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useSessionSearch } from '@/composables/useSessionSearch'
 
-type ActiveSection = 'chat' | 'history' | 'group'
+type ActiveSection = 'chat' | 'history' | 'group' | 'global'
 
 const props = defineProps<{
   active: ActiveSection
@@ -42,6 +42,11 @@ function openHistory() {
 function openGroupChat() {
   if (props.active === 'group') return
   void router.push({ name: 'hermes.groupChat' })
+}
+
+function openGlobalAgent() {
+  if (props.active === 'global') return
+  void router.push({ name: 'hermes.globalAgent' })
 }
 
 function openApiRelay() {
@@ -135,7 +140,7 @@ function openApiRelay() {
         <span>{{ t('sidebar.apiRelay') }}</span>
       </button>
     </div>
-    <div v-if="showModeSwitch" class="conversation-switch" role="tablist" aria-label="Conversation type">
+    <div v-if="showModeSwitch" class="conversation-switch conversation-switch--three" role="tablist" aria-label="Conversation type">
       <button
         class="conversation-switch-tab"
         :class="{ active: active === 'chat' || active === 'history' }"
@@ -145,6 +150,16 @@ function openApiRelay() {
         @click="openChat"
       >
         {{ t('sidebar.singleChat') }}
+      </button>
+      <button
+        class="conversation-switch-tab"
+        :class="{ active: active === 'global' }"
+        type="button"
+        role="tab"
+        :aria-selected="active === 'global'"
+        @click="openGlobalAgent"
+      >
+        {{ t('sidebar.globalAgent') }}
       </button>
       <button
         class="conversation-switch-tab"
@@ -221,6 +236,10 @@ function openApiRelay() {
   padding: 2px;
   border-radius: $radius-sm;
   background: rgba(var(--accent-primary-rgb), 0.05);
+}
+
+.conversation-switch--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .conversation-switch-tab {
