@@ -28,12 +28,6 @@ const usesPageSidebar = computed(() =>
 const showAppSidebar = computed(() => !isLoginPage.value && !usesPageSidebar.value)
 const showMobileMenuButton = computed(() => !isLoginPage.value && (showAppSidebar.value || usesPageSidebar.value))
 
-const nodeVersionLow = computed(() => {
-  const v = appStore.nodeVersion
-  const major = parseInt(v.split('.')[0], 10)
-  return !isNaN(major) && major < 23
-})
-
 const isDesktopShell = computed(() =>
   (window as typeof window & { hermesDesktop?: { isDesktop?: boolean } }).hermesDesktop?.isDesktop === true,
 )
@@ -76,9 +70,6 @@ useKeyboard()
         <NNotificationProvider>
           <div class="app-shell" :class="{ desktop: isDesktopShell, 'desktop-titlebar-host': hasDesktopTitleBar }">
             <DesktopTitleBar v-if="isDesktopShell" />
-            <div v-if="nodeVersionLow" class="node-warning-bar">
-              {{ t('sidebar.nodeVersionWarning', { version: appStore.nodeVersion }) }}
-            </div>
             <div class="app-layout" :class="{ 'no-sidebar': isLoginPage || !showAppSidebar }">
               <button v-if="showMobileMenuButton" class="hamburger-btn" @click="handleMobileMenuClick">
                 <img src="/logo.png" alt="Menu" style="width: 24px; height: 24px;" />
@@ -139,17 +130,4 @@ useKeyboard()
   }
 }
 
-.node-warning-bar {
-  flex: 0 0 auto;
-  width: 100%;
-  z-index: 100;
-  padding: 4px 16px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #b45309;
-  background-color: #fef3c7;
-  border-bottom: 1px solid #fde68a;
-  text-align: center;
-  line-height: 1.4;
-}
 </style>

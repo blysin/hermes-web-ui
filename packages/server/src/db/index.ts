@@ -3,14 +3,11 @@ import { resolve } from 'path'
 import { config } from '../config'
 
 const isDev = process.env.NODE_ENV !== 'production'
-const isTest = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test'
-
 // In WSL, always use home directory to avoid cross-filesystem issues
+const isTest = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test'
 const DB_DIR = isTest
   ? resolve(process.cwd(), 'packages/server/data/test-runtime')
-  : isDev
-  ? resolve(process.cwd(), 'packages/server/data')
-  : config.appHome
+  : resolve(config.appHome)
 const DB_PATH = resolve(DB_DIR, 'hermes-web-ui.db')
 const JSON_PATH = resolve(DB_DIR, 'hermes-web-ui.json')
 
